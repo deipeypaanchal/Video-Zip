@@ -152,12 +152,6 @@ int main(int argc, char **argv) {
         enqueue_work(&pool, work_file);
     }
 
-
-    // initialize the array that stores compressed file data
-    for (i = 0; i < nfiles; i++) {
-        compressed_files[i].size = 0;
-    }
-
     // delete the thread pool after all compression work is done
     thread_pool_delete(&pool);
 
