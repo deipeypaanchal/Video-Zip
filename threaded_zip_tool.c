@@ -1,6 +1,6 @@
 /********************************************************************
 * Author -      Vraj Patel, Deipy Panchal, Hieu Nguyen              *
-* NetIDs -      patelv27,                                           *
+* NetIDs -      patelv27, deepeypradippanchal, hieuminhnguyen       *
 * Program -     Video Compression Tool                              *
 * Description - This program implements a compression tool that     *
 *               takes multiple files representing a video's frames  *
@@ -62,11 +62,11 @@ typedef struct {
 //  Global Variables   //
 /////////////////////////
 
-compressed_file_t *compressed_files;
-int total_in = 0, total_out = 0;
-char **files = NULL;
-int nfiles = 0;
-char *directory;
+compressed_file_t *compressed_files;  // array to store all compressed files
+int total_in = 0, total_out = 0;  // byte counter
+char **files = NULL;   // an array of file names
+int nfiles = 0;  // number of files in input directory
+char *directory;  // directory stream
 
 /////////////////////////
 // Function Prototypes //
@@ -152,6 +152,12 @@ int main(int argc, char **argv) {
         enqueue_work(&pool, work_file);
     }
 
+
+    // initialize the array that stores compressed file data
+    for (i = 0; i < nfiles; i++) {
+        compressed_files[i].size = 0;
+    }
+
     // delete the thread pool after all compression work is done
     thread_pool_delete(&pool);
 
@@ -160,13 +166,16 @@ int main(int argc, char **argv) {
     assert(f_out != NULL);
 
     // for each compressed file in the array, write out to the final video.vzip file
-    for (i = 0; i < nfiles; i++) {
+    for (i = 0; i < nfiles;  i++) {
+        // proceed to sequentially write each compressed file to the output file
         fwrite(&compressed_files[i].size, sizeof(int), 1, f_out);
         fwrite(compressed_files[i].data, sizeof(unsigned char), compressed_files[i].size, f_out);
         total_in += compressed_files[i].input_size;
         total_out += compressed_files[i].size;
-        free(compressed_files[i].data); // free compressed data from the array after writing
+        free(compressed_files[i].data); // free compressed data from the array after writing    
     }
+
+    // close the output file stream
     fclose(f_out);
 
     // print compression rate
@@ -325,7 +334,7 @@ work_file_t *dequeue_work(thread_pool_t *pool) {
 }
 
 /************************************************************************
- * function thread_pool_initk() takes in a pointer to the thread pool   *
+ * function thread_pool_init() takes in a pointer to the thread pool   *
  * and initilizes the thread pool object setting head and tail pointers *
  * to NULL to indicate an empty work queue. This function also          *
  * initializes the mutex and condition variables to be shared amongst   *
