@@ -1,342 +1,15 @@
-// #include <dirent.h> 
-// #include <stdio.h> 
-// #include <assert.h>
-// #include <stdlib.h>
-// #include <string.h>
-// #include <zlib.h>
-// #include <time.h>
-
-// #define BUFFER_SIZE 1048576 // 1MB
-
-// int cmp(const void *a, const void *b) {
-// 	return strcmp(*(char **) a, *(char **) b);
-// }
-
-// int main(int argc, char **argv) {
-// 	// time computation header
-// 	struct timespec start, end;
-// 	clock_gettime(CLOCK_MONOTONIC, &start);
-// 	// end of time computation header
-
-// 	// do not modify the main function before this point!
-
-// 	assert(argc == 2);
-
-// 	DIR *d;
-// 	struct dirent *dir;
-// 	char **files = NULL;
-// 	int nfiles = 0;
-
-// 	d = opendir(argv[1]);
-// 	if(d == NULL) {
-// 		printf("An error has occurred\n");
-// 		return 0;
-// 	}
-
-// 	// create sorted list of PPM files
-// 	while ((dir = readdir(d)) != NULL) {
-// 		files = realloc(files, (nfiles+1)*sizeof(char *));
-// 		assert(files != NULL);
-
-// 		int len = strlen(dir->d_name);
-// 		if(dir->d_name[len-4] == '.' && dir->d_name[len-3] == 'p' && dir->d_name[len-2] == 'p' && dir->d_name[len-1] == 'm') {
-// 			files[nfiles] = strdup(dir->d_name);
-// 			assert(files[nfiles] != NULL);
-
-// 			nfiles++;
-// 		}
-// 	}
-// 	closedir(d);
-// 	qsort(files, nfiles, sizeof(char *), cmp);
-
-// 	// create a single zipped package with all PPM files in lexicographical order
-// 	int total_in = 0, total_out = 0;
-// 	FILE *f_out = fopen("video.vzip", "w");
-// 	assert(f_out != NULL);
-// 	int i = 0;
-// 	for(i=0; i < nfiles; i++) {
-// 		int len = strlen(argv[1])+strlen(files[i])+2;
-// 		char *full_path = malloc(len*sizeof(char));
-// 		assert(full_path != NULL);
-// 		strcpy(full_path, argv[1]);
-// 		strcat(full_path, "/");
-// 		strcat(full_path, files[i]);
-
-// 		unsigned char buffer_in[BUFFER_SIZE];
-// 		unsigned char buffer_out[BUFFER_SIZE];
-
-// 		// load file
-// 		FILE *f_in = fopen(full_path, "r");
-// 		assert(f_in != NULL);
-// 		int nbytes = fread(buffer_in, sizeof(unsigned char), BUFFER_SIZE, f_in);
-// 		fclose(f_in);
-// 		total_in += nbytes;
-
-// 		// zip file
-// 		z_stream strm;
-// 		int ret = deflateInit(&strm, 9);
-// 		assert(ret == Z_OK);
-// 		strm.avail_in = nbytes;
-// 		strm.next_in = buffer_in;
-// 		strm.avail_out = BUFFER_SIZE;
-// 		strm.next_out = buffer_out;
-
-// 		ret = deflate(&strm, Z_FINISH);
-// 		assert(ret == Z_STREAM_END);
-
-// 		// dump zipped file
-// 		int nbytes_zipped = BUFFER_SIZE-strm.avail_out;
-// 		fwrite(&nbytes_zipped, sizeof(int), 1, f_out);
-// 		fwrite(buffer_out, sizeof(unsigned char), nbytes_zipped, f_out);
-// 		total_out += nbytes_zipped;
-
-// 		free(full_path);
-// 	}
-// 	fclose(f_out);
-
-// 	printf("Compression rate: %.2lf%%\n", 100.0*(total_in-total_out)/total_in);
-
-// 	// release list of files
-// 	for(i=0; i < nfiles; i++)
-// 		free(files[i]);
-// 	free(files);
-
-// 	// do not modify the main function after this point!
-
-// 	// time computation footer
-// 	clock_gettime(CLOCK_MONOTONIC, &end);
-// 	printf("Time: %.2f seconds\n", ((double)end.tv_sec+1.0e-9*end.tv_nsec)-((double)start.tv_sec+1.0e-9*start.tv_nsec));
-// 	// end of time computation footer
-
-// 	return 0;
-// }
-
-// VERSION 2
-/*
-#include <dirent.h> 
-#include <stdio.h> 
-#include <assert.h>
-#include <stdlib.h>
-#include <string.h>
-#include <zlib.h>
-#include <time.h>
-#include <pthread.h>
-
-#define BUFFER_SIZE 1048576 // 1MB
-#define NUM_THREADS 20  // Reduced number of threads for stability
-
-// Structure to hold compression data
-typedef struct {
-    unsigned char *compressed_data;
-    int compressed_size;
-    int input_size;
-} CompressedFile;
-
-// Structure for thread arguments
-typedef struct {
-    char *dirname;
-    char **filenames;
-    int start_idx;
-    int end_idx;
-    CompressedFile *results;
-} ThreadArgs;
-
-int cmp(const void *a, const void *b) {
-    return strcmp(*(char **) a, *(char **) b);
-}
-
-void* compress_chunk(void *arg) {
-    ThreadArgs *args = (ThreadArgs*)arg;
-    
-    for (int i = args->start_idx; i < args->end_idx; i++) {
-        // Construct full path
-        char *full_path = malloc(strlen(args->dirname) + strlen(args->filenames[i]) + 2);
-        if (!full_path) continue;
-        
-        sprintf(full_path, "%s/%s", args->dirname, args->filenames[i]);
-        
-        // Read input file
-        FILE *f_in = fopen(full_path, "r");
-        if (!f_in) {
-            free(full_path);
-            continue;
-        }
-        
-        // Allocate buffers
-        unsigned char *buffer_in = malloc(BUFFER_SIZE);
-        unsigned char *buffer_out = malloc(BUFFER_SIZE);
-        
-        if (!buffer_in || !buffer_out) {
-            free(buffer_in);
-            free(buffer_out);
-            free(full_path);
-            fclose(f_in);
-            continue;
-        }
-        
-        // Read file content
-        int nbytes = fread(buffer_in, 1, BUFFER_SIZE, f_in);
-        fclose(f_in);
-        
-        // Initialize zlib stream
-        z_stream strm = {0};
-        if (deflateInit(&strm, 9) != Z_OK) {
-            free(buffer_in);
-            free(buffer_out);
-            free(full_path);
-            continue;
-        }
-        
-        // Set up compression
-        strm.avail_in = nbytes;
-        strm.next_in = buffer_in;
-        strm.avail_out = BUFFER_SIZE;
-        strm.next_out = buffer_out;
-        
-        // Compress
-        int ret = deflate(&strm, Z_FINISH);
-        if (ret == Z_STREAM_END) {
-            args->results[i].compressed_data = buffer_out;
-            args->results[i].compressed_size = BUFFER_SIZE - strm.avail_out;
-            args->results[i].input_size = nbytes;
-        } else {
-            free(buffer_out);
-        }
-        
-        // Cleanup
-        deflateEnd(&strm);
-        free(buffer_in);
-        free(full_path);
-    }
-    
-    return NULL;
-}
-
-int main(int argc, char **argv) {
-    // time computation header
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-
-    assert(argc == 2);
-
-    DIR *d;
-    struct dirent *dir;
-    char **files = NULL;
-    int nfiles = 0;
-
-    d = opendir(argv[1]);
-    if(d == NULL) {
-        printf("An error has occurred\n");
-        return 0;
-    }
-
-    // Create sorted list of PPM files
-    while ((dir = readdir(d)) != NULL) {
-        int len = strlen(dir->d_name);
-        if (len > 4 && strcmp(dir->d_name + len - 4, ".ppm") == 0) {
-            files = realloc(files, (nfiles + 1) * sizeof(char *));
-            if (!files) {
-                printf("Memory allocation error\n");
-                closedir(d);
-                return 0;
-            }
-            
-            files[nfiles] = strdup(dir->d_name);
-            if (!files[nfiles]) {
-                printf("Memory allocation error\n");
-                closedir(d);
-                return 0;
-            }
-            
-            nfiles++;
-        }
-    }
-    closedir(d);
-    
-    if (nfiles == 0) {
-        printf("No PPM files found\n");
-        return 0;
-    }
-    
-    qsort(files, nfiles, sizeof(char *), cmp);
-
-    // Initialize compression results array
-    CompressedFile *results = calloc(nfiles, sizeof(CompressedFile));
-    if (!results) {
-        printf("Memory allocation error\n");
-        return 0;
-    }
-
-    // Create threads
-    pthread_t threads[NUM_THREADS];
-    ThreadArgs thread_args[NUM_THREADS];
-    int files_per_thread = (nfiles + NUM_THREADS - 1) / NUM_THREADS;
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-        thread_args[i].dirname = argv[1];
-        thread_args[i].filenames = files;
-        thread_args[i].start_idx = i * files_per_thread;
-        thread_args[i].end_idx = (i + 1) * files_per_thread;
-        if (thread_args[i].end_idx > nfiles) {
-            thread_args[i].end_idx = nfiles;
-        }
-        thread_args[i].results = results;
-
-        if (thread_args[i].start_idx >= nfiles) {
-            break;
-        }
-
-        if (pthread_create(&threads[i], NULL, compress_chunk, &thread_args[i]) != 0) {
-            printf("Thread creation error\n");
-            return 0;
-        }
-    }
-
-    // Wait for threads to complete
-    for (int i = 0; i < NUM_THREADS; i++) {
-        if (i * files_per_thread < nfiles) {
-            pthread_join(threads[i], NULL);
-        }
-    }
-
-    // Write compressed data
-    FILE *f_out = fopen("video.vzip", "w");
-    if (!f_out) {
-        printf("Cannot create output file\n");
-        return 0;
-    }
-
-    int total_in = 0, total_out = 0;
-    for (int i = 0; i < nfiles; i++) {
-        if (results[i].compressed_data) {
-            fwrite(&results[i].compressed_size, sizeof(int), 1, f_out);
-            fwrite(results[i].compressed_data, 1, results[i].compressed_size, f_out);
-            total_in += results[i].input_size;
-            total_out += results[i].compressed_size;
-            free(results[i].compressed_data);
-        }
-    }
-    fclose(f_out);
-
-    printf("Compression rate: %.2lf%%\n", 100.0*(total_in-total_out)/total_in);
-
-    // Cleanup
-    for (int i = 0; i < nfiles; i++) {
-        free(files[i]);
-    }
-    free(files);
-    free(results);
-
-    // time computation footer
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    printf("Time: %.2f seconds\n", ((double)end.tv_sec+1.0e-9*end.tv_nsec)-((double)start.tv_sec+1.0e-9*start.tv_nsec));
-
-    return 0;
-}
-*/
-
+/********************************************************************
+* Author -      Vraj Patel, Deepey Panchal, Hieu Nguyen             *
+* NetIDs -      patelv27, deepeypradippanchal, hieuminhnguyen       *
+* Program -     Video Compression Tool                              *
+* Description - This program implements a compression tool that     *
+*               takes multiple files representing a video's frames  *
+*               and compresses them into a single output zip. The   *
+*               program effectively utilizes up to 20 threads to    *
+*               speed up the otherwise timely compression process.  *
+*********************************************************************/
 #include <dirent.h>
-#include <stdio.h> 
+#include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -344,93 +17,216 @@ int main(int argc, char **argv) {
 #include <time.h>
 #include <pthread.h>
 
-#define BUFFER_SIZE 1048576 // 1MB
-#define MAX_THREADS 20      // Maximum number of worker threads
+//////////////////////
+// Data Definitions //
+//////////////////////
 
-/**
- * Structure to store compressed file data.
- */
+#define BUFFER_SIZE 1048576 // 1MB
+#define MAX_THREADS 20      // Max number of allowed threads
+
+//////////////////////
+// Type Definitions //
+//////////////////////
+
+// represents the compressed file data - i.e. output of compressing 1 file
 typedef struct {
     int input_size;            // Size of the input file
     int size;                  // Size of the compressed data
     unsigned char *data;       // Compressed data
 } compressed_file_t;
 
-/**
- * Structure to pass work items to the worker threads.
- */
+// facilitates passing 'work files' to the worker threads.
 typedef struct {
     int index;                     // Index of the file in the files array
     char *directory;               // Directory containing the files
     char *filename;                // Filename to process
-} work_item_t;
+} work_file_t;
 
-/**
- * Queue node structure.
- */
+// this is a queue for work files implemented as a linked list
 typedef struct work_node {
-    work_item_t *work_item;
+    work_file_t *work_file;
     struct work_node *next;
 } work_node_t;
 
-/**
- * Thread pool structure.
- */
+// structure that stores all threads
 typedef struct {
     pthread_t threads[MAX_THREADS];
-    work_node_t *work_queue_head;
-    work_node_t *work_queue_tail;
-    pthread_mutex_t queue_mutex;
-    pthread_cond_t queue_cond;
-    int stop;
+    work_node_t *work_queue_head;    // points to start of linked list
+    work_node_t *work_queue_tail;    // points to end of linked list
+    pthread_mutex_t queue_mutex;    // concurrency lock shared across thread pool
+    pthread_cond_t queue_cond;    // condition variable shared across thread pool
+    int stop;    // when 0, there is work to be done
 } thread_pool_t;
 
-// Global variables
-compressed_file_t *compressed_files;
-int total_in = 0, total_out = 0;
-char **files = NULL;
-int nfiles = 0;
-char *directory;
+/////////////////////////
+//  Global Variables   //
+/////////////////////////
 
-/**
- * Function prototypes.
- */
+compressed_file_t *compressed_files;  // array to store all compressed files
+int total_in = 0, total_out = 0;  // byte counter
+char **files = NULL;   // an array of file names
+int nfiles = 0;  // number of files in input directory
+char *directory;  // directory stream
+
+/////////////////////////
+// Function Prototypes //
+/////////////////////////
+
+// the routine that all threads work out of
 void *worker_thread(void *arg);
-void enqueue_work(thread_pool_t *pool, work_item_t *work_item);
-work_item_t *dequeue_work(thread_pool_t *pool);
+
+// adds a work file entry to the end of the queue
+void enqueue_work(thread_pool_t *pool, work_file_t *work_file);
+
+// pops out a work file entry from the front of the queue
+work_file_t *dequeue_work(thread_pool_t *pool);
+
+// initializes the thread pool with the max number of threads
 void thread_pool_init(thread_pool_t *pool);
-void thread_pool_destroy(thread_pool_t *pool);
-void *worker_thread(void *arg);
 
-/**
- * Comparator function for qsort to sort filenames lexicographically.
- */
-int cmp(const void *a, const void *b) {
-    return strcmp(*(char **) a, *(char **) b);
+// cleans up by destroying the thread pool
+void thread_pool_delete(thread_pool_t *pool);
+
+// extracts the file number from its name to be used as an index
+int extract_index(const char *filename);
+
+/******************************************************************
+ * main: Reads the input directory of video frames, starts the    *
+ *       thread pool, and writes out resulting compression to the *
+ *       .vzip file. Also, the main function is responsible for   *
+ *       determining the running time and compression size.       * 
+ ******************************************************************/
+int main(int argc, char **argv) {
+    // Time computation header
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    // End of time computation header
+
+    // Do not modify the main function before this point!
+
+    assert(argc == 2);  // must be exactly one command line argument
+
+    // open a directory stream, and read all files within it to an array of strings
+    DIR *d;
+    struct dirent *dir;
+    nfiles = 0;
+    directory = argv[1];
+
+    d = opendir(directory);
+    if (d == NULL) {
+        printf("An error has occurred\n");
+        return 0;
+    }
+
+    // walk the input directory
+    while ((dir = readdir(d)) != NULL) {
+        int len = strlen(dir->d_name);
+        // if the file extension is ".ppm", read its contents and increment file counter
+        if (len >= 4 && strcmp(dir->d_name + len - 4, ".ppm") == 0) {
+            files = realloc(files, (nfiles + 1) * sizeof(char *));
+            assert(files != NULL);
+            files[nfiles] = strdup(dir->d_name);
+            assert(files[nfiles] != NULL);
+            nfiles++;
+        }
+    }
+    closedir(d);
+
+    // allocate the array that stores compressed file data
+    compressed_files = malloc(nfiles * sizeof(compressed_file_t));
+    assert(compressed_files != NULL);
+
+    // initialize the thread pool and start the threads
+    thread_pool_t pool;
+    thread_pool_init(&pool);
+
+    // enqueue each work file to the shared queue
+    int i;
+    for (i = 0; i < nfiles; i++) {
+        work_file_t *work_file = malloc(sizeof(work_file_t));
+        assert(work_file != NULL);
+        // populate fields within the work_file structure and add it to the queue
+        work_file->index = extract_index(files[i]); // extract index from file name
+        work_file->directory = directory;
+        work_file->filename = files[i];
+        enqueue_work(&pool, work_file);
+    }
+
+    // delete the thread pool after all compression work is done
+    thread_pool_delete(&pool);
+
+    // create a single zipped package called video.vzip with all ppm files in lexicographical order
+    FILE *f_out = fopen("video.vzip", "wb");    // open a file stream for writing
+    assert(f_out != NULL);
+
+    // for each compressed file in the array, write out to the final video.vzip file
+    for (i = 0; i < nfiles;  i++) {
+        // proceed to sequentially write each compressed file to the output file
+        fwrite(&compressed_files[i].size, sizeof(int), 1, f_out);
+        fwrite(compressed_files[i].data, sizeof(unsigned char), compressed_files[i].size, f_out);
+        total_in += compressed_files[i].input_size;
+        total_out += compressed_files[i].size;
+        free(compressed_files[i].data); // free compressed data from the array after writing    
+    }
+
+    // close the output file stream
+    fclose(f_out);
+
+    // print compression rate
+    printf("Compression rate: %.2lf%%\n", 100.0 * (total_in - total_out) / total_in);
+
+    // release the compressed files array
+    free(compressed_files);
+
+    // release list of files
+    for (i = 0; i < nfiles; i++)
+        free(files[i]);
+    free(files);
+
+    // Do not modify the main function after this point!
+
+    // Time computation footer
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("Time: %.2f seconds\n", ((double)end.tv_sec + 1.0e-9 * end.tv_nsec) - ((double)start.tv_sec + 1.0e-9 * start.tv_nsec));
+    // End of time computation footer
+
+    return 0;
 }
 
-/**
- * Worker thread function to process files.
- */
+/***********************************************************************
+ * function worker_thread() takes in any type of argument, and returns *
+ * any type. This routine is the primary routine that worker threads   *
+ * in the thread pool will be assigned. It consists of a while loop    *
+ * that forces all worker threads to continuously grab work_files from *
+ * the queue and compress it until there are no more work files to be  *
+ * be compressed.                                                      *
+ ***********************************************************************/
 void *worker_thread(void *arg) {
-    thread_pool_t *pool = (thread_pool_t *)arg;
+    // cast the argument into a pointer to the thread pool
+    thread_pool_t *pool = (thread_pool_t *) arg;
+    // break loop and finish routine only when no more work files to be processed
     while (1) {
+        // use mutexes to ensure two threads don't work on compressing the same file
         pthread_mutex_lock(&pool->queue_mutex);
+        // wait while the work queue is empty and the stop indicator is still off
         while (pool->work_queue_head == NULL && !pool->stop) {
             pthread_cond_wait(&pool->queue_cond, &pool->queue_mutex);
         }
+        // if stop indicator is on and work queue is empty, all work is done, so unlock mutex and exit
         if (pool->stop && pool->work_queue_head == NULL) {
             pthread_mutex_unlock(&pool->queue_mutex);
             break;
         }
-        work_item_t *work_item = dequeue_work(pool);
-        pthread_mutex_unlock(&pool->queue_mutex);
+        // otherwise, continue with processing and obtain next work item
+        work_file_t *work_file = dequeue_work(pool);
+        pthread_mutex_unlock(&pool->queue_mutex); // release lock - not needed until we pull next item
 
-        if (work_item) {
-            int index = work_item->index;
-            char *filename = work_item->filename;
+        // now thread begins to execute the compression of the file pulled from the work queue
+        if (work_file) {
+            int index = work_file->index;
+            char *filename = work_file->filename;
 
-            // Build the full path to the file
+            // Build the full path to the file as in the provided code
             int len = strlen(directory) + strlen(filename) + 2;
             char *full_path = malloc(len * sizeof(char));
             assert(full_path != NULL);
@@ -438,19 +234,19 @@ void *worker_thread(void *arg) {
             strcat(full_path, "/");
             strcat(full_path, filename);
 
-            // Allocate buffers on the heap
+            // Allocate buffers on the heap (shared spaced amongst threads)
             unsigned char *buffer_in = malloc(BUFFER_SIZE * sizeof(unsigned char));
             assert(buffer_in != NULL);
             unsigned char *buffer_out = malloc(BUFFER_SIZE * sizeof(unsigned char));
             assert(buffer_out != NULL);
 
             // Load the input file
-            FILE *f_in = fopen(full_path, "rb");
+            FILE *f_in = fopen(full_path, "rb"); // open file in binary mode
             assert(f_in != NULL);
             int nbytes = fread(buffer_in, sizeof(unsigned char), BUFFER_SIZE, f_in);
             fclose(f_in);
 
-            // Store the size of the input file
+            // Store the size of the input file to the compressed files array
             compressed_files[index].input_size = nbytes;
 
             // Compress the data using zlib
@@ -466,180 +262,130 @@ void *worker_thread(void *arg) {
             assert(ret == Z_STREAM_END);
             deflateEnd(&strm);
 
-            // Store the compressed data
+            // Store the compressed data into the globally defined compressed files array
             int nbytes_zipped = BUFFER_SIZE - strm.avail_out;
             compressed_files[index].data = malloc(nbytes_zipped * sizeof(unsigned char));
             assert(compressed_files[index].data != NULL);
             memcpy(compressed_files[index].data, buffer_out, nbytes_zipped);
             compressed_files[index].size = nbytes_zipped;
 
-            // Clean up
+            // free all dynamically allocated pointers
             free(buffer_in);
             free(buffer_out);
             free(full_path);
-            free(work_item); // Free the work item
+            free(work_file); // free the completed work item
         }
     }
     return NULL;
 }
 
-/**
- * Enqueue a work item to the thread pool's work queue.
- */
-void enqueue_work(thread_pool_t *pool, work_item_t *work_item) {
+
+/************************************************************************
+ * function enqueue_work() takes in a pointer to the thread pool and    *
+ * creates a new node to add to the end of the linked list representing *
+ * the queue. While enqueuing the file, mutex is used to prevent orphan *
+ * nodes, thus preventing concurrency issues.                           *
+ ************************************************************************/
+void enqueue_work(thread_pool_t *pool, work_file_t *work_file) {
     work_node_t *node = malloc(sizeof(work_node_t));
     assert(node != NULL);
-    node->work_item = work_item;
+    node->work_file = work_file;
     node->next = NULL;
 
+    // add new node to the end of the linked list
+    // concurrency lock needed here to prevent orphan nodes
     pthread_mutex_lock(&pool->queue_mutex);
-    if (pool->work_queue_tail == NULL) {
+    if (pool->work_queue_tail == NULL) {  // if empty queue head = tail = node
         pool->work_queue_head = node;
         pool->work_queue_tail = node;
     } else {
         pool->work_queue_tail->next = node;
         pool->work_queue_tail = node;
     }
+    // send signal to a blocked thread that one more file is ready to be compressed
     pthread_cond_signal(&pool->queue_cond);
     pthread_mutex_unlock(&pool->queue_mutex);
 }
 
-/**
- * Dequeue a work item from the thread pool's work queue.
- */
-work_item_t *dequeue_work(thread_pool_t *pool) {
+/************************************************************************
+ * function dequeue_work() takes in a pointer to the thread pool and    *
+ * returns a pointer to the next work file to be processed.             * 
+ ************************************************************************/
+work_file_t *dequeue_work(thread_pool_t *pool) {
     work_node_t *node = pool->work_queue_head;
-    if (node == NULL) {
+    if (node == NULL) { // if work queue is empty
         return NULL;
     }
+    // the head pointer of linked list points to the subsequent work node
     pool->work_queue_head = node->next;
-    if (pool->work_queue_head == NULL) {
+    if (pool->work_queue_head == NULL) {  // if resulting list is empty
         pool->work_queue_tail = NULL;
     }
-    work_item_t *work_item = node->work_item;
+    // return the work file stored inside the work node
+    work_file_t *work_file = node->work_file;
     free(node);
-    return work_item;
+    return work_file;
 }
 
-/**
- * Initialize the thread pool.
- */
+/************************************************************************
+ * function thread_pool_init() takes in a pointer to the thread pool   *
+ * and initilizes the thread pool object setting head and tail pointers *
+ * to NULL to indicate an empty work queue. This function also          *
+ * initializes the mutex and condition variables to be shared amongst   *
+ * the thread to manage concurrency issues during processing.           *
+ ************************************************************************/
 void thread_pool_init(thread_pool_t *pool) {
+    // initialize empty linked list for the queue
     pool->work_queue_head = NULL;
     pool->work_queue_tail = NULL;
+    // stop flag is initially off (indicating outstanding work)
     pool->stop = 0;
+    // intialize the mutex and condition variable
     pthread_mutex_init(&pool->queue_mutex, NULL);
     pthread_cond_init(&pool->queue_cond, NULL);
-    for (int i = 0; i < MAX_THREADS; i++) {
+    // populate the threads array
+	int i;
+    for (i = 0; i < MAX_THREADS; i++) {
         pthread_create(&pool->threads[i], NULL, worker_thread, pool);
     }
 }
 
-/**
- * Destroy the thread pool.
- */
-void thread_pool_destroy(thread_pool_t *pool) {
+/************************************************************************
+ * function thread_pool_delete() cleans up the thread pool, unblocking  *
+ * all threads and deleting the mutex and condition variable.           *
+ ************************************************************************/
+void thread_pool_delete(thread_pool_t *pool) {
+    // define a critial section to mark that all work is done by setting the stop signal
     pthread_mutex_lock(&pool->queue_mutex);
     pool->stop = 1;
     pthread_cond_broadcast(&pool->queue_cond);
     pthread_mutex_unlock(&pool->queue_mutex);
-    for (int i = 0; i < MAX_THREADS; i++) {
+
+    //for each thread, join it with the main
+	int i;
+    for (i = 0; i < MAX_THREADS; i++) {
         pthread_join(pool->threads[i], NULL);
     }
+    // delete the mutex and condition variable
     pthread_mutex_destroy(&pool->queue_mutex);
     pthread_cond_destroy(&pool->queue_cond);
 }
 
-int main(int argc, char **argv) {
-    // Time computation header
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    // End of time computation header
-
-    // Do not modify the main function before this point!
-
-    assert(argc == 2);
-
-    DIR *d;
-    struct dirent *dir;
-    nfiles = 0;
-    directory = argv[1];
-
-    d = opendir(directory);
-    if (d == NULL) {
-        printf("An error has occurred\n");
-        return 0;
-    }
-
-    // Create sorted list of PPM files
-    while ((dir = readdir(d)) != NULL) {
-        int len = strlen(dir->d_name);
-        if (len >= 4 && strcmp(dir->d_name + len - 4, ".ppm") == 0) {
-            files = realloc(files, (nfiles + 1) * sizeof(char *));
-            assert(files != NULL);
-            files[nfiles] = strdup(dir->d_name);
-            assert(files[nfiles] != NULL);
-            nfiles++;
-        }
-    }
-    closedir(d);
-    qsort(files, nfiles, sizeof(char *), cmp);
-
-    // Initialize array to store compressed file data
-    compressed_files = malloc(nfiles * sizeof(compressed_file_t));
-    assert(compressed_files != NULL);
-    for (int i = 0; i < nfiles; i++) {
-        compressed_files[i].input_size = 0;
-        compressed_files[i].size = 0;
-        compressed_files[i].data = NULL;
-    }
-
-    // Initialize thread pool
-    thread_pool_t pool;
-    thread_pool_init(&pool);
-
-    // Enqueue work items
-    for (int i = 0; i < nfiles; i++) {
-        work_item_t *work_item = malloc(sizeof(work_item_t));
-        assert(work_item != NULL);
-        work_item->index = i;
-        work_item->directory = directory;
-        work_item->filename = files[i];
-        enqueue_work(&pool, work_item);
-    }
-
-    // Destroy thread pool after all work is done
-    thread_pool_destroy(&pool);
-
-    // Create a single zipped package with all PPM files in lexicographical order
-    FILE *f_out = fopen("video.vzip", "wb");
-    assert(f_out != NULL);
-
-    for (int i = 0; i < nfiles; i++) {
-        fwrite(&compressed_files[i].size, sizeof(int), 1, f_out);
-        fwrite(compressed_files[i].data, sizeof(unsigned char), compressed_files[i].size, f_out);
-        total_in += compressed_files[i].input_size;
-        total_out += compressed_files[i].size;
-        free(compressed_files[i].data); // Free compressed data
-    }
-    fclose(f_out);
-
-    printf("Compression rate: %.2lf%%\n", 100.0 * (total_in - total_out) / total_in);
-
-    // Release the compressed files array
-    free(compressed_files);
-
-    // Release list of files
-    for (int i = 0; i < nfiles; i++)
-        free(files[i]);
-    free(files);
-
-    // Do not modify the main function after this point!
-
-    // Time computation footer
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    printf("Time: %.2f seconds\n", ((double)end.tv_sec + 1.0e-9 * end.tv_nsec) - ((double)start.tv_sec + 1.0e-9 * start.tv_nsec));
-    // End of time computation footer
-
-    return 0;
+/************************************************************************
+ * function extract_index() takes in the .ppm file name, and uses the   *
+ * the part of the name before the extension to determine the frame     *
+ * number. This index is used to store the compressed file in the       *
+ * proper position within the globally allocated compressed files array * 
+ ************************************************************************/
+int extract_index(const char *filename){
+    // find lenght of the filename
+    int len = strlen(filename);
+    int index;
+    // store the part of the filename before the extension
+    char *tmp = (char *) malloc(sizeof(char)*5);
+    strncpy(tmp, filename, len - 4);
+    // convert string to an integer, subtracting one to use with array indexing
+    index = atoi(tmp) - 1;
+    free(tmp);
+    return index;
 }
