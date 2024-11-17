@@ -1,6 +1,6 @@
 /********************************************************************
-* Author -      Vraj Patel, Deipy Panchal, Hieu Nguyen              *
-* NetIDs -      patelv27,                                           *
+* Author -      Vraj Patel, Deepey Panchal, Hieu Nguyen             *
+* NetIDs -      patelv27, deepeypradippanchal,                      *
 * Program -     Video Compression Tool                              *
 * Description - This program implements a compression tool that     *
 *               takes multiple files representing a video's frames  *
