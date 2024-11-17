@@ -1,5 +1,5 @@
 /********************************************************************
-* Author -      Vraj Patel, Deipy Panchal, Hieu Nguyen              *
+* Author -      Vraj Patel, Deepey Panchal, Hieu Nguyen             *
 * NetIDs -      patelv27, deepeypradippanchal, hieuminhnguyen       *
 * Program -     Video Compression Tool                              *
 * Description - This program implements a compression tool that     *
